@@ -8,14 +8,14 @@ import os
 import signal
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
 
 _BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(_BASE_DIR / ".env")
+load_dotenv(_BASE_DIR / ".env", override=True)
 sys.path.insert(0, str(_BASE_DIR))
 
 from agent.llm import create_adapter
@@ -60,6 +60,23 @@ import atexit
 atexit.register(lambda: _LOCKFILE.unlink(missing_ok=True))
 
 CHARACTER_DIR = _BASE_DIR / "character"
+_STATE_FILE = _BASE_DIR / f".state_{CHARAKTER}.json"
+
+
+def load_last_seen_ts() -> str | None:
+    if _STATE_FILE.exists():
+        try:
+            return json.loads(_STATE_FILE.read_text()).get("last_seen_ts")
+        except Exception:
+            pass
+    return None
+
+
+def save_last_seen_ts(ts: str) -> None:
+    try:
+        _STATE_FILE.write_text(json.dumps({"last_seen_ts": ts}))
+    except Exception:
+        pass
 
 
 def fetch_messages(after_ts: str | None) -> list[dict]:
@@ -201,12 +218,13 @@ def run():
     print(f"Player-Bot gestartet: {CHARAKTER} → {LLM_MODEL} [{LLM_PROVIDER}]")
     print(f"Polling alle {POLL_INTERVAL}s auf Channel {DISCORD_CHANNEL_ID}\n")
 
-    last_seen_ts = datetime.now(timezone.utc).isoformat()
+    last_seen_ts = load_last_seen_ts()
     while True:
         try:
             new_msgs = fetch_messages(last_seen_ts)
             if new_msgs:
                 last_seen_ts = new_msgs[-1]["timestamp"]
+                save_last_seen_ts(last_seen_ts)
                 for msg in new_msgs:
                     content = msg.get("content", "")
                     author = (msg.get("author") or {}).get("username", "")
