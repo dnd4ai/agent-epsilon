@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Player Agent – steuert einen einzelnen KI-Spieler-Charakter in Discord.
-Charakter wird über CHARACTER_NAME in .env gesetzt.
+Charaktername wird automatisch vom Discord Bot-Token abgerufen.
 """
 import json
 import os
@@ -14,11 +14,36 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-_BASE_DIR = Path(__file__).resolve().parents[1]
+_BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(_BASE_DIR / ".env")
 sys.path.insert(0, str(_BASE_DIR))
 
-_LOCKFILE = Path(f"/tmp/player_agent_{os.environ.get('CHARACTER_NAME', 'default')}.lock")
+from agent.llm import create_adapter
+from agent.discord_agent import send_message
+
+DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
+DISCORD_CHANNEL_ID = os.environ["DISCORD_CHANNEL_ID"]
+POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "5"))
+LLM_MODEL = os.environ.get("LLM_MODEL", "")
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "hub")
+
+if not LLM_MODEL:
+    print("ERROR: LLM_MODEL nicht in .env gesetzt", file=sys.stderr)
+    sys.exit(1)
+
+
+def fetch_bot_username() -> str:
+    resp = requests.get(
+        "https://discord.com/api/v10/users/@me",
+        headers={"Authorization": f"Bot {DISCORD_TOKEN}"},
+    )
+    resp.raise_for_status()
+    return resp.json()["username"]
+
+
+CHARAKTER = fetch_bot_username()
+
+_LOCKFILE = Path(f"/tmp/player_agent_{CHARAKTER}.lock")
 try:
     if _LOCKFILE.exists():
         old_pid = int(_LOCKFILE.read_text().strip())
@@ -34,25 +59,7 @@ except Exception:
 import atexit
 atexit.register(lambda: _LOCKFILE.unlink(missing_ok=True))
 
-from dnd4ai_core.llm import create_adapter
-from dnd4ai_core.discord_agent import send_message
-
 CHARACTER_DIR = _BASE_DIR / "character"
-
-CHARAKTER = os.environ.get("CHARACTER_NAME", "")
-if not CHARAKTER:
-    print("ERROR: CHARACTER_NAME nicht in .env gesetzt", file=sys.stderr)
-    sys.exit(1)
-
-DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
-DISCORD_CHANNEL_ID = os.environ["DISCORD_CHANNEL_ID"]
-POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "5"))
-LLM_MODEL = os.environ.get("LLM_MODEL", "")
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "hub")
-
-if not LLM_MODEL:
-    print("ERROR: LLM_MODEL nicht in .env gesetzt", file=sys.stderr)
-    sys.exit(1)
 
 
 def fetch_messages(after_ts: str | None) -> list[dict]:
@@ -163,13 +170,13 @@ REGISTRATION_TRIGGERS = ["alle agenten", "alle spieler", "meldet euch", "registr
 STOP_TRIGGER = "🛑 **SPIEL GESTOPPT**"
 
 
-def should_respond(agent_name: str, message_content: str) -> bool:
+def should_respond(message_content: str) -> bool:
     lower = message_content.lower()
     if any(trigger in lower for trigger in GROUP_TRIGGERS):
         return True
     if any(trigger in lower for trigger in REGISTRATION_TRIGGERS):
         return True
-    return CHARAKTER.lower() in lower or agent_name.lower() in lower
+    return CHARAKTER.lower() in lower
 
 
 def build_messages(recent_msgs: list[dict]) -> list[dict]:
@@ -185,7 +192,6 @@ def build_messages(recent_msgs: list[dict]) -> list[dict]:
 
 
 def run():
-    agent_name = os.environ.get("DISCORD_BOT_NAME", CHARAKTER)
     try:
         adapter = create_adapter(LLM_MODEL, provider=LLM_PROVIDER)
     except ValueError as e:
@@ -207,11 +213,11 @@ def run():
                     if STOP_TRIGGER in content:
                         print(f"[{CHARAKTER}] Stop-Signal empfangen. Beende...")
                         sys.exit(0)
-                    if agent_name.lower() == author.lower():
+                    if CHARAKTER.lower() == author.lower():
                         continue
                     if content.startswith(f"**[{CHARAKTER.capitalize()}]**"):
                         continue
-                    if not should_respond(agent_name, content):
+                    if not should_respond(content):
                         continue
                     personality = load_personality()
                     system_prompt = build_system_prompt(personality)
