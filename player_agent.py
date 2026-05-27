@@ -233,8 +233,6 @@ def run():
                         sys.exit(0)
                     if CHARAKTER.lower() == author.lower():
                         continue
-                    if content.startswith(f"**[{CHARAKTER.capitalize()}]**"):
-                        continue
                     if not should_respond(content):
                         continue
                     personality = load_personality()
@@ -244,7 +242,7 @@ def run():
                     print(f"[{CHARAKTER}] antwortet auf: {content[:60]}...")
                     try:
                         response = adapter.complete(system_prompt, messages)
-                        send_message(DISCORD_TOKEN, DISCORD_CHANNEL_ID, f"**[{CHARAKTER.capitalize()}]** {response}")
+                        send_message(DISCORD_TOKEN, DISCORD_CHANNEL_ID, response)
                         print(f"[{CHARAKTER}] → {response[:80]}...")
                     except Exception as e:
                         print(f"[{CHARAKTER}] Fehler: {e}", file=sys.stderr)
